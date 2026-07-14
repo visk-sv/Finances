@@ -17,14 +17,14 @@ export function Stats() {
 
   const month = months[currentMonth];
   const totalIncome = monthTotalIncome(month);
-  const allocatedTotal = monthAllocatedTotal(month, totalIncome);
+  const allocatedTotal = monthAllocatedTotal(categories, month, totalIncome);
   const remaining = totalIncome - allocatedTotal;
 
-  const series = useMemo(() => recentMonthsSeries(months, 6, currentMonth), [months, currentMonth]);
+  const series = useMemo(() => recentMonthsSeries(months, categories, 6, currentMonth), [months, categories, currentMonth]);
   const breakdown = useMemo(() => categoryBreakdown(month, categories), [month, categories]);
   const avgIncome = useMemo(() => averageIncome(series), [series]);
   const outstanding = outstandingLoanAmount(loans);
-  const transferred = transferredProgress(month);
+  const transferred = transferredProgress(month, categories);
   const transferredShare = transferred.total > 0 ? transferred.done / transferred.total : 0;
 
   return (

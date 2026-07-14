@@ -8,17 +8,6 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-function buildAllocationsForMonth(categories: Category[]): CategoryAllocation[] {
-  return categories
-    .filter((c) => !c.archived)
-    .map((c) => ({
-      categoryId: c.id,
-      type: c.defaultAllocationType,
-      value: c.defaultAllocationValue,
-      transferred: false,
-    }));
-}
-
 interface BudgetState {
   categories: Category[];
   months: Record<string, MonthData>;
@@ -37,6 +26,7 @@ interface BudgetState {
   addCategory: (cat: Omit<Category, 'id'>) => void;
   updateCategory: (id: string, patch: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
+  reorderCategories: (orderedActiveIds: string[]) => void;
 
   addLoan: (loan: Omit<Loan, 'id' | 'repaid'>) => void;
   toggleLoanRepaid: (id: string, repaidMonth?: string) => void;
@@ -62,11 +52,7 @@ export const useBudgetStore = create<BudgetState>()(
           return {
             months: {
               ...state.months,
-              [key]: {
-                key,
-                incomes: [],
-                allocations: buildAllocationsForMonth(state.categories),
-              },
+              [key]: { key, incomes: [], allocations: [] },
             },
           };
         });
@@ -102,29 +88,46 @@ export const useBudgetStore = create<BudgetState>()(
         get().ensureMonth(mKey);
         set((state) => {
           const month = state.months[mKey];
+          const cat = state.categories.find((c) => c.id === categoryId);
           const exists = month.allocations.some((a) => a.categoryId === categoryId);
           const allocations = exists
             ? month.allocations.map((a) => (a.categoryId === categoryId ? { ...a, ...patch } : a))
-            : [...month.allocations, { categoryId, type: patch.type ?? 'percent', value: patch.value ?? 0, transferred: false }];
+            : [
+                ...month.allocations,
+                {
+                  categoryId,
+                  type: patch.type ?? cat?.defaultAllocationType ?? 'percent',
+                  value: patch.value ?? cat?.defaultAllocationValue ?? 0,
+                  transferred: false,
+                },
+              ];
           return { months: { ...state.months, [mKey]: { ...month, allocations } } };
         });
       },
 
       toggleTransferred: (mKey, categoryId) => {
+        get().ensureMonth(mKey);
         set((state) => {
           const month = state.months[mKey];
-          if (!month) return state;
-          return {
-            months: {
-              ...state.months,
-              [mKey]: {
-                ...month,
-                allocations: month.allocations.map((a) =>
-                  a.categoryId === categoryId ? { ...a, transferred: !a.transferred } : a,
-                ),
+          const existing = month.allocations.find((a) => a.categoryId === categoryId);
+          let allocations: CategoryAllocation[];
+          if (existing) {
+            allocations = month.allocations.map((a) =>
+              a.categoryId === categoryId ? { ...a, transferred: !a.transferred } : a,
+            );
+          } else {
+            const cat = state.categories.find((c) => c.id === categoryId);
+            allocations = [
+              ...month.allocations,
+              {
+                categoryId,
+                type: cat?.defaultAllocationType ?? 'percent',
+                value: cat?.defaultAllocationValue ?? 0,
+                transferred: true,
               },
-            },
-          };
+            ];
+          }
+          return { months: { ...state.months, [mKey]: { ...month, allocations } } };
         });
       },
 
@@ -142,6 +145,16 @@ export const useBudgetStore = create<BudgetState>()(
         set((state) => ({
           categories: state.categories.map((c) => (c.id === id ? { ...c, archived: true } : c)),
         }));
+      },
+
+      reorderCategories: (orderedActiveIds) => {
+        set((state) => {
+          const byId = new Map(state.categories.map((c) => [c.id, c]));
+          const reordered = orderedActiveIds.map((id) => byId.get(id)).filter((c): c is Category => !!c);
+          const orderedSet = new Set(orderedActiveIds);
+          const rest = state.categories.filter((c) => !orderedSet.has(c.id));
+          return { categories: [...reordered, ...rest] };
+        });
       },
 
       addLoan: (loan) => {
@@ -172,7 +185,23 @@ export const useBudgetStore = create<BudgetState>()(
     }),
     {
       name: 'finances-budget-store',
-      version: 1,
+      version: 2,
+      migrate: (persisted: unknown, version) => {
+        const state = persisted as BudgetState;
+        if (version < 2) {
+          const catById = new Map(state.categories.map((c) => [c.id, c]));
+          for (const key of Object.keys(state.months)) {
+            const month = state.months[key];
+            month.allocations = month.allocations.filter((a) => {
+              const cat = catById.get(a.categoryId);
+              if (!cat) return false;
+              const isUntouchedDefault = a.type === cat.defaultAllocationType && a.value === cat.defaultAllocationValue;
+              return a.transferred || !isUntouchedDefault;
+            });
+          }
+        }
+        return state;
+      },
       onRehydrateStorage: () => (state) => {
         state?.ensureMonth(state.currentMonth);
       },

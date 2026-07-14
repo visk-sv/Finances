@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Trash2, ChevronDown } from 'lucide-react';
 import { useBudgetStore } from '../store/useBudgetStore';
-import { categoryFigures, formatPLN, monthAllocatedTotal, monthTotalIncome } from '../lib/calculations';
+import { categoryFigures, formatPLN, monthAllocatedTotal, monthTotalIncome, resolveAllocation } from '../lib/calculations';
 import { CategoryCard } from '../components/CategoryCard';
 import { AddIncomeModal } from '../components/modals/AddIncomeModal';
 import { AllocationModal } from '../components/modals/AllocationModal';
@@ -22,16 +22,13 @@ export function Dashboard() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   const totalIncome = monthTotalIncome(month);
-  const allocatedTotal = monthAllocatedTotal(month, totalIncome);
+  const allocatedTotal = monthAllocatedTotal(categories, month, totalIncome);
   const remaining = totalIncome - allocatedTotal;
 
   const activeCategories = useMemo(() => categories.filter((c) => !c.archived), [categories]);
   const incomes = month?.incomes ?? [];
-  const allocations = month?.allocations ?? [];
 
-  const editingAllocation = editingCategory
-    ? allocations.find((a) => a.categoryId === editingCategory.id) ?? { categoryId: editingCategory.id, type: editingCategory.defaultAllocationType, value: editingCategory.defaultAllocationValue, transferred: false }
-    : null;
+  const editingAllocation = editingCategory ? resolveAllocation(editingCategory, month) : null;
 
   return (
     <div className="flex flex-col gap-4 px-4 pt-3 pb-6">
@@ -109,12 +106,7 @@ export function Dashboard() {
 
       <div className="flex flex-col gap-3">
         {activeCategories.map((cat) => {
-          const alloc = allocations.find((a) => a.categoryId === cat.id) ?? {
-            categoryId: cat.id,
-            type: cat.defaultAllocationType,
-            value: cat.defaultAllocationValue,
-            transferred: false,
-          };
+          const alloc = resolveAllocation(cat, month);
           const figures = categoryFigures(alloc, totalIncome, loans, currentMonth, cat.id);
           return (
             <CategoryCard

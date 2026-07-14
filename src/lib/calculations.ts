@@ -1,4 +1,4 @@
-import type { CategoryAllocation, Loan, MonthData } from '../types';
+import type { Category, CategoryAllocation, Loan, MonthData } from '../types';
 
 export function monthTotalIncome(month: MonthData | undefined): number {
   if (!month) return 0;
@@ -8,6 +8,23 @@ export function monthTotalIncome(month: MonthData | undefined): number {
 export function allocationBaseAmount(alloc: CategoryAllocation, totalIncome: number): number {
   if (alloc.type === 'percent') return (totalIncome * alloc.value) / 100;
   return alloc.value;
+}
+
+/**
+ * A month only stores an allocation entry once the user explicitly overrides it for
+ * that month (via the dashboard's edit modal). Everywhere else, a category's live
+ * defaults apply — so editing a category always affects every month that hasn't
+ * been individually customized.
+ */
+export function resolveAllocation(category: Category, month: MonthData | undefined): CategoryAllocation {
+  const override = month?.allocations.find((a) => a.categoryId === category.id);
+  if (override) return override;
+  return {
+    categoryId: category.id,
+    type: category.defaultAllocationType,
+    value: category.defaultAllocationValue,
+    transferred: false,
+  };
 }
 
 /** Loans lent out of this category, created in this month (reduces category funds until repaid). */
@@ -54,9 +71,10 @@ export function categoryFigures(
   return { allocated, loanedOut, loanedIn, repaymentsReceived, netAvailable };
 }
 
-export function monthAllocatedTotal(month: MonthData | undefined, totalIncome: number): number {
-  if (!month) return 0;
-  return month.allocations.reduce((sum, a) => sum + allocationBaseAmount(a, totalIncome), 0);
+export function monthAllocatedTotal(categories: Category[], month: MonthData | undefined, totalIncome: number): number {
+  return categories
+    .filter((c) => !c.archived)
+    .reduce((sum, c) => sum + allocationBaseAmount(resolveAllocation(c, month), totalIncome), 0);
 }
 
 export function outstandingLoanAmount(loans: Loan[]): number {

@@ -1,5 +1,5 @@
 import type { Category, Loan, MonthData } from '../types';
-import { monthAllocatedTotal, monthTotalIncome } from './calculations';
+import { allocationBaseAmount, monthAllocatedTotal, monthTotalIncome, resolveAllocation } from './calculations';
 import { monthKey as toMonthKey, monthLabel, shiftMonth } from './month';
 
 export interface MonthSeriesPoint {
@@ -12,6 +12,7 @@ export interface MonthSeriesPoint {
 
 export function recentMonthsSeries(
   months: Record<string, MonthData>,
+  categories: Category[],
   count: number,
   endKey: string = toMonthKey(new Date()),
 ): MonthSeriesPoint[] {
@@ -21,7 +22,7 @@ export function recentMonthsSeries(
   return keys.map((key) => {
     const month = months[key];
     const income = monthTotalIncome(month);
-    const allocated = monthAllocatedTotal(month, income);
+    const allocated = monthAllocatedTotal(categories, month, income);
     const full = monthLabel(key);
     return {
       key,
@@ -42,25 +43,21 @@ export interface CategoryBreakdownPoint {
 }
 
 export function categoryBreakdown(month: MonthData | undefined, categories: Category[]): CategoryBreakdownPoint[] {
-  if (!month) return [];
   const totalIncome = monthTotalIncome(month);
-  return month.allocations
-    .map((a) => {
-      const cat = categories.find((c) => c.id === a.categoryId);
-      if (!cat) return null;
-      const amount = a.type === 'percent' ? (totalIncome * a.value) / 100 : a.value;
-      return { categoryId: cat.id, name: cat.name, icon: cat.icon, color: cat.color, amount };
+  return categories
+    .filter((c) => !c.archived)
+    .map((c) => {
+      const amount = allocationBaseAmount(resolveAllocation(c, month), totalIncome);
+      return { categoryId: c.id, name: c.name, icon: c.icon, color: c.color, amount };
     })
-    .filter((v): v is CategoryBreakdownPoint => v !== null && v.amount > 0)
+    .filter((v) => v.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 }
 
-export function transferredProgress(month: MonthData | undefined): { done: number; total: number } {
-  if (!month) return { done: 0, total: 0 };
-  return {
-    done: month.allocations.filter((a) => a.transferred).length,
-    total: month.allocations.length,
-  };
+export function transferredProgress(month: MonthData | undefined, categories: Category[]): { done: number; total: number } {
+  const active = categories.filter((c) => !c.archived);
+  const done = active.filter((c) => resolveAllocation(c, month).transferred).length;
+  return { done, total: active.length };
 }
 
 export function averageIncome(series: MonthSeriesPoint[]): number {
